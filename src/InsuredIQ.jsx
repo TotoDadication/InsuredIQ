@@ -40,6 +40,25 @@ async function deleteProfile(id) {
   await sbFetch(`profiles?id=eq.${id}`, { method: "DELETE" });
 }
 
+async function logSearch(record) {
+  await sbFetch("search_history", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: JSON.stringify({
+      id: `search_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+      searched_at: Date.now(),
+      query: record.query,
+      business_name: record.businessName,
+      city: record.city,
+      state: record.state,
+    }),
+  });
+}
+
+async function loadSearchHistory() {
+  return await sbFetch("search_history?order=searched_at.desc&limit=100");
+}
+
 const SYSTEM_PROMPT = `You are InsuredIQ, an AI research tool for independent insurance agents at Paradox Insurance Agency. When given a business name, address, or any other identifying information, use web search to research the business and return a structured JSON profile for use in insurance intake and submission.
 
 If the user provides a street address, search for what business is located at that address, then profile that business. If you genuinely cannot identify any business from the input after searching, return JSON with businessName set to "Unknown" and confidence set to "low" and populate as many fields as possible.
@@ -422,6 +441,45 @@ function ProfileView({ profile, onCopy, onSave, copied, saved }) {
   );
 }
 
+function HistoryTab() {
+  const [history, setHistory] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    loadSearchHistory().then(rows => {
+      setHistory(rows || []);
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  if (!loaded) return <div style={{ padding: 40, textAlign: "center", color: "#888780", fontSize: 13 }}>Loading...</div>;
+
+  if (history.length === 0) return (
+    <div style={s.emptyState}>
+      <div style={s.emptyIcon}>🕐</div>
+      <div style={s.emptyTitle}>No search history yet</div>
+      <div style={s.emptyDesc}>Every business you research will appear here.</div>
+    </div>
+  );
+
+  return (
+    <div style={s.historyList}>
+      {history.map(r => (
+        <div key={r.id} style={{ background: "#fff", border: "0.5px solid rgba(0,0,0,0.18)", borderRadius: 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "#1C1C1A" }}>{r.business_name}</div>
+            <div style={{ fontSize: 12, color: "#888780", marginTop: 2 }}>
+              {[r.city, r.state].filter(Boolean).join(", ")}
+              {r.query ? ` · searched as "${r.query}"` : ""}
+            </div>
+          </div>
+          <div style={{ fontSize: 11, color: "#888780", flexShrink: 0 }}>{new Date(r.searched_at).toLocaleString()}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function InsuredIQ() {
   const [activeTab, setActiveTab] = useState("search");
   const [query, setQuery] = useState("");
@@ -473,9 +531,7 @@ export default function InsuredIQ() {
     try {
       const res = await fetch("/api/research", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
           max_tokens: 3000,
@@ -497,6 +553,7 @@ export default function InsuredIQ() {
         else throw new Error("No business found for that input. Try a business name with city and state for best results.");
       }
       setProfile(parsed);
+      logSearch({ query: q, businessName: parsed.businessName, city: parsed.contact?.city, state: parsed.contact?.state }).catch(() => {});
     } catch (err) {
       setError(err.message || "Unknown error. Please try again.");
     } finally {
@@ -530,20 +587,20 @@ export default function InsuredIQ() {
     const p = profile;
     const addr = [p.contact?.address, p.contact?.city, p.contact?.state, p.contact?.zip].filter(Boolean).join(", ");
     const lines = [
-      `INSUREDIQ PROFILE — ${new Date().toLocaleDateString()}`,``,
+      `INSUREDIQ PROFILE — ${new Date().toLocaleDateString()}`, ``,
       `Business Name: ${p.businessName}${p.dba ? ` (dba ${p.dba})` : ""}`,
-      `Address: ${addr}`,`Phone: ${p.contact?.phone || ""}`,
-      `Website: ${p.contact?.website || ""}`,`Email: ${p.contact?.email || ""}`,``,
+      `Address: ${addr}`, `Phone: ${p.contact?.phone || ""}`,
+      `Website: ${p.contact?.website || ""}`, `Email: ${p.contact?.email || ""}`, ``,
       `Entity Type: ${p.businessDetails?.legalEntity || ""}`,
       `Year Founded: ${p.businessDetails?.yearFounded || ""}`,
       `Employees: ${p.businessDetails?.employeeCount || ""}`,
-      `Est. Revenue: ${p.businessDetails?.annualRevenue || ""}`,``,
+      `Est. Revenue: ${p.businessDetails?.annualRevenue || ""}`, ``,
       `NAICS: ${p.classCodes?.naics?.code || ""} — ${p.classCodes?.naics?.description || ""}`,
       `SIC: ${p.classCodes?.sic?.code || ""} — ${p.classCodes?.sic?.description || ""}`,
-      `GL Class: ${p.classCodes?.glClass || ""}`,``,`OPERATIONS:`,p.operations,``,
+      `GL Class: ${p.classCodes?.glClass || ""}`, ``, `OPERATIONS:`, p.operations, ``,
       `COVERAGE RECOMMENDATIONS:`,
-      ...(p.coverageRecommendations || []).map(c => `[${c.priority.toUpperCase()}] ${c.coverage} — ${c.reason}`),``,
-      ...(p.flags?.length ? [`UNDERWRITING FLAGS:`, ...p.flags.map(f => `• ${f}`),``] : []),
+      ...(p.coverageRecommendations || []).map(c => `[${c.priority.toUpperCase()}] ${c.coverage} — ${c.reason}`), ``,
+      ...(p.flags?.length ? [`UNDERWRITING FLAGS:`, ...p.flags.map(f => `• ${f}`), ``] : []),
       `Confidence: ${p.confidence} — ${p.dataSourceNotes || ""}`,
     ];
     navigator.clipboard.writeText(lines.join("\n")).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
@@ -571,11 +628,9 @@ export default function InsuredIQ() {
       </div>
 
       <div style={s.main}>
-
         {activeTab === "search" && (
           <>
             <ProspectDashboard records={dbRecords} />
-
             <div style={s.howBox}>
               <div style={s.howTitle}>How it works</div>
               <div style={s.howGrid}>
@@ -694,37 +749,7 @@ export default function InsuredIQ() {
           </>
         )}
 
-        {activeTab === "history" && (
-          <>
-            {dbRecords.length === 0 ? (
-              <div style={s.emptyState}>
-                <div style={s.emptyIcon}>🕐</div>
-                <div style={s.emptyTitle}>No search history yet</div>
-                <div style={s.emptyDesc}>Every profile you save will appear here for review.</div>
-              </div>
-            ) : (
-              <div style={s.historyList}>
-                {dbRecords.map(record => (
-                  <div key={record.id}
-                    style={{ ...s.historyCard, ...(hoveredId === record.id ? s.historyCardHover : {}) }}
-                    onClick={() => { setSelectedRecord(record); setActiveTab("database"); }}
-                    onMouseEnter={() => setHoveredId(record.id)}
-                    onMouseLeave={() => setHoveredId(null)}>
-                    <div style={s.historyMeta}>
-                      <div style={s.historyName}>{record.profile?.businessName}</div>
-                      <div style={s.historyDetail}>Searched as: "{record.query}" · {new Date(record.savedAt).toLocaleString()}</div>
-                    </div>
-                    <div style={s.historyRight}>
-                      <ConfPill confidence={record.profile?.confidence} />
-                      <button style={s.btnDelete} onClick={(e) => deleteRecord(record.id, e)} title="Delete">×</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        )}
-
+        {activeTab === "history" && <HistoryTab />}
       </div>
     </div>
   );
