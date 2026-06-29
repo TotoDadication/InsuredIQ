@@ -4,4 +4,4 @@ import InsuredIQ from './InsuredIQ'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode><InsuredIQ /></StrictMode>
-)
+)// updated
