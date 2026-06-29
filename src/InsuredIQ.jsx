@@ -1,5 +1,45 @@
 import { useState, useRef, useEffect } from "react";
 
+const SUPABASE_URL = "https://sjkeerulozbifeevcboy.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNqa2VlcnVsb3piaWZlZXZjYm95Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3NjU5NTMsImV4cCI6MjA5ODM0MTk1M30.sbWyZYFaWzKMfr03PN9M-ZOJbNSLQUuVpoE4OwtmLks";
+
+async function sbFetch(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": options.prefer || "",
+      ...options.headers,
+    },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function loadProfiles() {
+  return await sbFetch("profiles?order=saved_at.desc");
+}
+
+async function saveProfile(record) {
+  await sbFetch("profiles", {
+    method: "POST",
+    prefer: "return=minimal",
+    body: JSON.stringify({
+      id: record.id,
+      saved_at: record.savedAt,
+      query: record.query,
+      profile: record.profile,
+    }),
+  });
+}
+
+async function deleteProfile(id) {
+  await sbFetch(`profiles?id=eq.${id}`, { method: "DELETE" });
+}
+
 const SYSTEM_PROMPT = `You are InsuredIQ, an AI research tool for independent insurance agents at Paradox Insurance Agency. When given a business name, address, or any other identifying information, use web search to research the business and return a structured JSON profile for use in insurance intake and submission.
 
 If the user provides a street address, search for what business is located at that address, then profile that business. If you genuinely cannot identify any business from the input after searching, return JSON with businessName set to "Unknown" and confidence set to "low" and populate as many fields as possible.
@@ -54,8 +94,8 @@ Return ONLY valid JSON, no markdown, no code fences, no explanation. The JSON mu
 Use your web search capability to research the business. If you cannot find reliable information for a field, use null — never fabricate data. Be specific and accurate for real businesses. confidence: high = found official website + corroborating sources; medium = found some data but gaps remain; low = limited information found.`;
 
 const STATUS_STEPS = [
-  { delay: 0,     step: "Searching the web...",        detail: "Looking up business records and website" },
-  { delay: 5000,  step: "Analyzing operations...",     detail: "Identifying class codes and risk profile" },
+  { delay: 0,     step: "Searching the web...",         detail: "Looking up business records and website" },
+  { delay: 5000,  step: "Analyzing operations...",      detail: "Identifying class codes and risk profile" },
   { delay: 10000, step: "Building coverage profile...", detail: "Matching coverages to business type" },
 ];
 
@@ -64,6 +104,8 @@ const EXAMPLES = [
   "Video Punk, St. Charles MO",
   "Lakeside Daycare Center, Chesterfield MO",
 ];
+
+const BAR_COLORS = ["#185FA5","#1D9E75","#BA7517","#A32D2D","#534AB7"];
 
 const s = {
   wrap: { fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: "#1C1C1A", background: "#F7F6F2", minHeight: "100vh", padding: 0 },
@@ -100,7 +142,7 @@ const s = {
   bizSub: { fontSize: 13, color: "#888780", marginTop: 3 },
   btnRow: { display: "flex", gap: 8, flexShrink: 0 },
   btnCopy: { height: 34, padding: "0 14px", background: "#fff", border: "0.5px solid rgba(0,0,0,0.22)", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#5F5E5A", whiteSpace: "nowrap", fontFamily: "inherit" },
-  btnSave: { height: 34, padding: "0 14px", background: "#185FA5", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", color: "#fff", whiteSpace: "nowrap", fontFamily: "inherit" },
+  btnSave: { height: 34, padding: "0 16px", background: "#3B6D11", border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#fff", whiteSpace: "nowrap", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 5 },
   btnSaved: { background: "#3B6D11" },
   grid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 },
   card: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.18)", borderRadius: 12, padding: "16px 18px" },
@@ -146,6 +188,18 @@ const s = {
   statCard: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.18)", borderRadius: 12, padding: "14px 16px" },
   statNum: { fontSize: 22, fontWeight: 600, color: "#185FA5", letterSpacing: -0.5 },
   statLabel: { fontSize: 11, color: "#888780", marginTop: 2 },
+  dashGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 24 },
+  dashCard: { background: "#fff", border: "0.5px solid rgba(0,0,0,0.18)", borderRadius: 12, padding: "16px 18px" },
+  dashTitle: { fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.6, color: "#888780", marginBottom: 14 },
+  barRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 10 },
+  barLabel: { fontSize: 12, color: "#1C1C1A", width: 130, flexShrink: 0, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  barTrack: { flex: 1, background: "#F1EFE8", borderRadius: 4, height: 8, overflow: "hidden" },
+  barFill: { height: 8, borderRadius: 4, transition: "width 0.4s ease" },
+  barCount: { fontSize: 12, color: "#888780", width: 20, textAlign: "right", flexShrink: 0 },
+  geoRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "7px 0", borderBottom: "0.5px solid rgba(0,0,0,0.07)", fontSize: 13 },
+  geoState: { fontWeight: 500, color: "#1C1C1A" },
+  geoCities: { fontSize: 12, color: "#888780", flex: 1, padding: "0 10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  geoCount: { fontSize: 12, fontWeight: 500, color: "#185FA5", background: "#E6F1FB", padding: "2px 8px", borderRadius: 20 },
 };
 
 function Spinner() {
@@ -180,6 +234,83 @@ function ConfPill({ confidence }) {
   return <span style={{ ...s.confPill, ...style }}>{confidence}</span>;
 }
 
+function ProspectDashboard({ records }) {
+  if (!records || records.length === 0) return null;
+
+  const naicsCounts = {};
+  records.forEach(r => {
+    const desc = r.profile?.classCodes?.naics?.description;
+    const code = r.profile?.classCodes?.naics?.code;
+    if (desc && code) {
+      const key = desc;
+      if (!naicsCounts[key]) naicsCounts[key] = { count: 0, code };
+      naicsCounts[key].count++;
+    }
+  });
+  const topNaics = Object.entries(naicsCounts)
+    .map(([desc, v]) => ({ desc, ...v }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+  const maxNaics = topNaics[0]?.count || 1;
+
+  const geoCounts = {};
+  records.forEach(r => {
+    const state = r.profile?.contact?.state;
+    const city = r.profile?.contact?.city;
+    if (state) {
+      if (!geoCounts[state]) geoCounts[state] = { count: 0, cities: new Set() };
+      geoCounts[state].count++;
+      if (city) geoCounts[state].cities.add(city);
+    }
+  });
+  const topGeo = Object.entries(geoCounts)
+    .map(([state, v]) => ({ state, count: v.count, cities: [...v.cities].slice(0, 3) }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
+
+  return (
+    <div style={s.dashGrid}>
+      <div style={s.dashCard}>
+        <div style={s.dashTitle}>Top business types</div>
+        {topNaics.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#888780" }}>No NAICS data in saved profiles yet.</div>
+        ) : (
+          topNaics.map((item, i) => (
+            <div key={item.desc} style={s.barRow}>
+              <div style={{ ...s.barLabel }} title={item.desc}>{item.desc}</div>
+              <div style={s.barTrack}>
+                <div style={{ ...s.barFill, width: `${Math.round((item.count / maxNaics) * 100)}%`, background: BAR_COLORS[i] }} />
+              </div>
+              <div style={s.barCount}>{item.count}</div>
+            </div>
+          ))
+        )}
+        {topNaics.length > 0 && (
+          <div style={{ marginTop: 10, fontSize: 11, color: "#888780" }}>Based on {records.length} saved profile{records.length !== 1 ? "s" : ""}</div>
+        )}
+      </div>
+
+      <div style={s.dashCard}>
+        <div style={s.dashTitle}>Geographic spread</div>
+        {topGeo.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#888780" }}>No location data in saved profiles yet.</div>
+        ) : (
+          topGeo.map((item, i) => (
+            <div key={item.state} style={{ ...s.geoRow, borderBottom: i === topGeo.length - 1 ? "none" : "0.5px solid rgba(0,0,0,0.07)" }}>
+              <span style={s.geoState}>{item.state}</span>
+              <span style={s.geoCities}>{item.cities.join(", ")}</span>
+              <span style={s.geoCount}>{item.count}</span>
+            </div>
+          ))
+        )}
+        {topGeo.length > 0 && (
+          <div style={{ marginTop: 10, fontSize: 11, color: "#888780" }}>Count = prospects saved per state</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ProfileView({ profile, onCopy, onSave, copied, saved }) {
   const addr = [profile.contact?.address, profile.contact?.city, profile.contact?.state, profile.contact?.zip].filter(Boolean).join(", ");
   const confColor = profile.confidence === "high" ? "#639922" : profile.confidence === "medium" ? "#EF9F27" : "#E24B4A";
@@ -198,7 +329,7 @@ function ProfileView({ profile, onCopy, onSave, copied, saved }) {
         <div style={s.btnRow}>
           <button style={s.btnCopy} onClick={onCopy}>{copied ? "Copied!" : "Copy for Wunderite"}</button>
           <button style={{ ...s.btnSave, ...(saved ? s.btnSaved : {}) }} onClick={onSave}>
-            {saved ? "Saved to DB" : "Save to database"}
+            {saved ? "✓ Saved to database" : "⊕ Save to database"}
           </button>
         </div>
       </div>
@@ -281,6 +412,12 @@ function ProfileView({ profile, onCopy, onSave, copied, saved }) {
       <p style={s.disclaimer}>
         All fields are AI-generated and require producer verification before use in a submission. Revenue and employee figures are estimates unless confirmed by the insured. Class codes should be verified against the applicable carrier's classification manual.
       </p>
+      {!saved && (
+        <div style={{ marginTop: 14, background: "#EAF3DE", border: "0.5px solid rgba(59,109,17,0.25)", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span style={{ fontSize: 13, color: "#3B6D11" }}>Want to track this prospect? Save it to your database to view it later and populate the dashboard.</span>
+          <button style={{ ...s.btnSave, flexShrink: 0 }} onClick={onSave}>⊕ Save to database</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -304,17 +441,14 @@ export default function InsuredIQ() {
 
   async function loadDb() {
     try {
-      const result = await window.storage.list("insurediq:");
-      const records = [];
-      for (const key of (result?.keys || [])) {
-        try {
-          const r = await window.storage.get(key);
-          if (r?.value) records.push(JSON.parse(r.value));
-        } catch {}
-      }
-      records.sort((a, b) => b.savedAt - a.savedAt);
-      setDbRecords(records);
-    } catch {}
+      const records = await loadProfiles();
+      setDbRecords(records.map(r => ({
+        id: r.id,
+        savedAt: r.saved_at,
+        query: r.query,
+        profile: r.profile,
+      })));
+    } catch(e) { console.error(e); }
     setDbLoaded(true);
   }
 
@@ -340,33 +474,30 @@ export default function InsuredIQ() {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
-  "Content-Type": "application/json",
-  "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY,
-  "anthropic-version": "2023-06-01",
-  "anthropic-beta": "interstitial-web-search-2025-03-05"
-},
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_ANTHROPIC_KEY,
+          "anthropic-version": "2023-06-01",
+          "anthropic-beta": "interstitial-web-search-2025-03-05"
+        },
         body: JSON.stringify({
           model: "claude-sonnet-4-6",
-          max_tokens: 1500,
+          max_tokens: 3000,
           system: SYSTEM_PROMPT,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
           messages: [{ role: "user", content: `Research this business for insurance intake: ${q}` }],
         }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data.error?.message || "API error");
-
       const textBlock = data.content.find(b => b.type === "text");
       if (!textBlock) throw new Error("No text response from AI");
-
       let raw = textBlock.text.trim().replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
       let parsed;
       try { parsed = JSON.parse(raw); }
       catch {
         const m = raw.match(/\{[\s\S]*\}/);
         if (m) parsed = JSON.parse(m[0]);
-        else throw new Error("No business found for that input. Try searching by business name instead of address, or add a city/state for better results.");
+        else throw new Error("No business found for that input. Try a business name with city and state for best results.");
       }
       setProfile(parsed);
     } catch (err) {
@@ -380,28 +511,21 @@ export default function InsuredIQ() {
   async function saveToDb() {
     if (!profile || saved) return;
     const id = `insurediq:${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
-    const record = {
-      id,
-      savedAt: Date.now(),
-      query,
-      profile,
-    };
+    const record = { id, savedAt: Date.now(), query, profile };
     try {
-      await window.storage.set(id, JSON.stringify(record));
+      await saveProfile(record);
       setSaved(true);
       setDbRecords(prev => [record, ...prev]);
-    } catch (e) {
-      alert("Save failed: " + e.message);
-    }
+    } catch (e) { alert("Save failed: " + e.message); }
   }
 
   async function deleteRecord(id, e) {
     e.stopPropagation();
     try {
-      await window.storage.delete(id);
+      await deleteProfile(id);
       setDbRecords(prev => prev.filter(r => r.id !== id));
       if (selectedRecord?.id === id) setSelectedRecord(null);
-    } catch {}
+    } catch(e) { console.error(e); }
   }
 
   function copyProfile() {
@@ -409,36 +533,23 @@ export default function InsuredIQ() {
     const p = profile;
     const addr = [p.contact?.address, p.contact?.city, p.contact?.state, p.contact?.zip].filter(Boolean).join(", ");
     const lines = [
-      `INSUREDIQ PROFILE — ${new Date().toLocaleDateString()}`,
-      ``,
+      `INSUREDIQ PROFILE — ${new Date().toLocaleDateString()}`,``,
       `Business Name: ${p.businessName}${p.dba ? ` (dba ${p.dba})` : ""}`,
-      `Address: ${addr}`,
-      `Phone: ${p.contact?.phone || ""}`,
-      `Website: ${p.contact?.website || ""}`,
-      `Email: ${p.contact?.email || ""}`,
-      ``,
+      `Address: ${addr}`,`Phone: ${p.contact?.phone || ""}`,
+      `Website: ${p.contact?.website || ""}`,`Email: ${p.contact?.email || ""}`,``,
       `Entity Type: ${p.businessDetails?.legalEntity || ""}`,
       `Year Founded: ${p.businessDetails?.yearFounded || ""}`,
       `Employees: ${p.businessDetails?.employeeCount || ""}`,
-      `Est. Revenue: ${p.businessDetails?.annualRevenue || ""}`,
-      ``,
+      `Est. Revenue: ${p.businessDetails?.annualRevenue || ""}`,``,
       `NAICS: ${p.classCodes?.naics?.code || ""} — ${p.classCodes?.naics?.description || ""}`,
       `SIC: ${p.classCodes?.sic?.code || ""} — ${p.classCodes?.sic?.description || ""}`,
-      `GL Class: ${p.classCodes?.glClass || ""}`,
-      ``,
-      `OPERATIONS:`,
-      p.operations,
-      ``,
+      `GL Class: ${p.classCodes?.glClass || ""}`,``,`OPERATIONS:`,p.operations,``,
       `COVERAGE RECOMMENDATIONS:`,
-      ...(p.coverageRecommendations || []).map(c => `[${c.priority.toUpperCase()}] ${c.coverage} — ${c.reason}`),
-      ``,
-      ...(p.flags?.length ? [`UNDERWRITING FLAGS:`, ...p.flags.map(f => `• ${f}`), ``] : []),
+      ...(p.coverageRecommendations || []).map(c => `[${c.priority.toUpperCase()}] ${c.coverage} — ${c.reason}`),``,
+      ...(p.flags?.length ? [`UNDERWRITING FLAGS:`, ...p.flags.map(f => `• ${f}`),``] : []),
       `Confidence: ${p.confidence} — ${p.dataSourceNotes || ""}`,
     ];
-    navigator.clipboard.writeText(lines.join("\n")).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+    navigator.clipboard.writeText(lines.join("\n")).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); });
   }
 
   const step = STATUS_STEPS[statusIdx];
@@ -449,17 +560,15 @@ export default function InsuredIQ() {
     <div style={s.wrap}>
       <div style={s.header}>
         <div style={s.logoMark}>IQ</div>
-        <div>
-          <span style={s.logoText}>InsuredIQ</span>
-          <span style={s.logoSub}> by Paradox Insurance</span>
-        </div>
+        <div><span style={s.logoText}>InsuredIQ</span><span style={s.logoSub}> by Paradox Insurance</span></div>
         <div style={s.badge}>Prototype v0.1</div>
       </div>
 
       <div style={s.tabs}>
-        {[["search","Research"], ["database","Database"], ["history","Search history"]].map(([id, label]) => (
-          <button key={id} style={{ ...s.tab, ...(activeTab === id ? s.tabActive : {}) }} onClick={() => { setActiveTab(id); setSelectedRecord(null); }}>
-            {label} {id === "database" && dbRecords.length > 0 && `(${dbRecords.length})`}
+        {[["search","Research"],["database","Database"],["history","Search history"]].map(([id, label]) => (
+          <button key={id} style={{ ...s.tab, ...(activeTab === id ? s.tabActive : {}) }}
+            onClick={() => { setActiveTab(id); setSelectedRecord(null); }}>
+            {label}
           </button>
         ))}
       </div>
@@ -468,6 +577,8 @@ export default function InsuredIQ() {
 
         {activeTab === "search" && (
           <>
+            <ProspectDashboard records={dbRecords} />
+
             <div style={s.howBox}>
               <div style={s.howTitle}>How it works</div>
               <div style={s.howGrid}>
@@ -475,7 +586,7 @@ export default function InsuredIQ() {
                   ["Step 1","Enter a business name","Type any business, optionally with city or state"],
                   ["Step 2","AI searches the web","Claude searches for the website, contact info, and operations"],
                   ["Step 3","Profile is built","Claude assigns NAICS/SIC codes and coverage recommendations"],
-                  ["Step 4","Save to database","Store the profile for later review, or copy into Wunderite"],
+                  ["Step 4","Save to database","Store the profile — it feeds the dashboard above"],
                 ].map(([num, title, desc]) => (
                   <div key={num} style={s.howStep}>
                     <div style={s.stepNum}>{num}</div>
@@ -489,14 +600,12 @@ export default function InsuredIQ() {
             <div style={s.searchBox}>
               <label style={s.searchLabel}>Business name</label>
               <div style={s.searchRow}>
-                <input
-                  style={s.input}
-                  value={query}
+                <input style={s.input} value={query}
                   onChange={e => setQuery(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && runSearch()}
-                  placeholder="Business name or address — e.g. Paradox Insurance, Kalispell MT"
-                />
-                <button style={{ ...s.btnSearch, ...(loading ? s.btnSearchDis : {}) }} onClick={() => runSearch()} disabled={loading}>
+                  placeholder="Business name or address — e.g. Paradox Insurance, Kalispell MT" />
+                <button style={{ ...s.btnSearch, ...(loading ? s.btnSearchDis : {}) }}
+                  onClick={() => runSearch()} disabled={loading}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
                   </svg>
@@ -504,12 +613,9 @@ export default function InsuredIQ() {
                 </button>
               </div>
               <div style={s.examples}>
-                Try an example:
-                {EXAMPLES.map((ex, i) => (
-                  <span key={ex}>
-                    {i > 0 && " · "}
-                    <span style={s.exLink} onClick={() => { setQuery(ex); runSearch(ex); }}>{ex.split(",")[0]}</span>
-                  </span>
+                Try:
+                {EXAMPLES.map(ex => (
+                  <span key={ex} style={s.exLink} onClick={() => { setQuery(ex); runSearch(ex); }}>{ex}</span>
                 ))}
               </div>
             </div>
@@ -517,22 +623,14 @@ export default function InsuredIQ() {
             {loading && (
               <div style={s.statusBar}>
                 <Spinner />
-                <div style={s.statusText}>
-                  <span style={s.statusStep}>{step.step}</span> {step.detail}
-                </div>
+                <div style={s.statusText}><span style={s.statusStep}>{step.step}</span> {step.detail}</div>
               </div>
             )}
 
             {error && <div style={s.errBox}>Research failed: {error}</div>}
 
             {profile && (
-              <ProfileView
-                profile={profile}
-                onCopy={copyProfile}
-                onSave={saveToDb}
-                copied={copied}
-                saved={saved}
-              />
+              <ProfileView profile={profile} onCopy={copyProfile} onSave={saveToDb} copied={copied} saved={saved} />
             )}
           </>
         )}
@@ -542,50 +640,23 @@ export default function InsuredIQ() {
             {selectedRecord ? (
               <>
                 <div style={{ marginBottom: 16 }}>
-                  <button style={{ ...s.btnCopy, marginBottom: 0 }} onClick={() => setSelectedRecord(null)}>
-                    Back to database
-                  </button>
+                  <button style={s.btnCopy} onClick={() => setSelectedRecord(null)}>Back to database</button>
                   <span style={{ fontSize: 12, color: "#888780", marginLeft: 12 }}>
                     Saved {new Date(selectedRecord.savedAt).toLocaleDateString()} — searched as "{selectedRecord.query}"
                   </span>
                 </div>
                 <ProfileView
                   profile={selectedRecord.profile}
-                  onCopy={() => {
-                    const p = selectedRecord.profile;
-                    const addr = [p.contact?.address, p.contact?.city, p.contact?.state, p.contact?.zip].filter(Boolean).join(", ");
-                    navigator.clipboard.writeText([
-                      `INSUREDIQ PROFILE — ${new Date(selectedRecord.savedAt).toLocaleDateString()}`,
-                      `Business Name: ${p.businessName}`,
-                      `Address: ${addr}`,
-                      `NAICS: ${p.classCodes?.naics?.code} — ${p.classCodes?.naics?.description}`,
-                      ``,
-                      `OPERATIONS:`, p.operations,
-                    ].join("\n"));
-                    setCopied(true); setTimeout(() => setCopied(false), 2000);
-                  }}
-                  onSave={() => {}}
-                  copied={copied}
-                  saved={true}
-                />
+                  onCopy={copyProfile}
+                  onSave={() => {}} copied={copied} saved={true} />
               </>
             ) : (
               <>
                 <div style={s.dbStats}>
-                  <div style={s.statCard}>
-                    <div style={s.statNum}>{dbRecords.length}</div>
-                    <div style={s.statLabel}>Total profiles saved</div>
-                  </div>
-                  <div style={s.statCard}>
-                    <div style={s.statNum}>{highCount}</div>
-                    <div style={s.statLabel}>High confidence</div>
-                  </div>
-                  <div style={s.statCard}>
-                    <div style={{ ...s.statNum, color: flagCount > 0 ? "#BA7517" : "#185FA5" }}>{flagCount}</div>
-                    <div style={s.statLabel}>With UW flags</div>
-                  </div>
+                  <div style={s.statCard}><div style={s.statNum}>{dbRecords.length}</div><div style={s.statLabel}>Profiles saved</div></div>
+                  <div style={s.statCard}><div style={s.statNum}>{highCount}</div><div style={s.statLabel}>High confidence</div></div>
+                  <div style={s.statCard}><div style={{ ...s.statNum, color: flagCount > 0 ? "#BA7517" : "#185FA5" }}>{flagCount}</div><div style={s.statLabel}>With UW flags</div></div>
                 </div>
-
                 {dbRecords.length === 0 ? (
                   <div style={s.emptyState}>
                     <div style={s.emptyIcon}>🗄️</div>
@@ -595,13 +666,11 @@ export default function InsuredIQ() {
                 ) : (
                   <div style={s.historyList}>
                     {dbRecords.map(record => (
-                      <div
-                        key={record.id}
+                      <div key={record.id}
                         style={{ ...s.historyCard, ...(hoveredId === record.id ? s.historyCardHover : {}) }}
                         onClick={() => setSelectedRecord(record)}
                         onMouseEnter={() => setHoveredId(record.id)}
-                        onMouseLeave={() => setHoveredId(null)}
-                      >
+                        onMouseLeave={() => setHoveredId(null)}>
                         <div style={s.historyMeta}>
                           <div style={s.historyName}>{record.profile?.businessName}</div>
                           <div style={s.historyDetail}>
@@ -639,13 +708,11 @@ export default function InsuredIQ() {
             ) : (
               <div style={s.historyList}>
                 {dbRecords.map(record => (
-                  <div
-                    key={record.id}
+                  <div key={record.id}
                     style={{ ...s.historyCard, ...(hoveredId === record.id ? s.historyCardHover : {}) }}
                     onClick={() => { setSelectedRecord(record); setActiveTab("database"); }}
                     onMouseEnter={() => setHoveredId(record.id)}
-                    onMouseLeave={() => setHoveredId(null)}
-                  >
+                    onMouseLeave={() => setHoveredId(null)}>
                     <div style={s.historyMeta}>
                       <div style={s.historyName}>{record.profile?.businessName}</div>
                       <div style={s.historyDetail}>Searched as: "{record.query}" · {new Date(record.savedAt).toLocaleString()}</div>
