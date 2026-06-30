@@ -56,7 +56,7 @@ async function logSearch(record) {
 }
 
 async function loadSearchHistory() {
-  return await sbFetch("search_history?order=searched_at.desc&limit=100");
+  return await sbFetch("search_history?order=searched_at.desc&limit=200");
 }
 
 const SYSTEM_PROMPT = `You are InsuredIQ, an AI research tool for independent insurance agents at Paradox Insurance Agency. When given a business name, address, or any other identifying information, use web search to research the business and return a structured JSON profile for use in insurance intake and submission.
@@ -186,6 +186,8 @@ const s = {
   opsText: { fontSize: 13, color: "#5F5E5A", lineHeight: 1.6 },
   confRow: { display: "flex", alignItems: "center", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "0.5px solid rgba(0,0,0,0.08)", fontSize: 12, color: "#888780" },
   confDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
+  placesVerified: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#3B6D11", background: "#EAF3DE", border: "0.5px solid rgba(59,109,17,0.25)", borderRadius: 8, padding: "6px 12px" },
+  placesUnverified: { display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12, color: "#633806", background: "#FAEEDA", border: "0.5px solid rgba(186,117,23,0.35)", borderRadius: 8, padding: "6px 12px" },
   disclaimer: { fontSize: 11, color: "#888780", marginTop: 16, lineHeight: 1.5 },
   emptyState: { textAlign: "center", padding: "60px 20px", color: "#888780" },
   emptyIcon: { fontSize: 32, marginBottom: 12 },
@@ -308,7 +310,6 @@ function ProspectDashboard({ records }) {
           <div style={{ marginTop: 10, fontSize: 11, color: "#888780" }}>Based on {records.length} saved profile{records.length !== 1 ? "s" : ""}</div>
         )}
       </div>
-
       <div style={s.dashCard}>
         <div style={s.dashTitle}>Geographic spread</div>
         {topGeo.length === 0 ? (
@@ -334,6 +335,9 @@ function ProfileView({ profile, onCopy, onSave, copied, saved }) {
   const addr = [profile.contact?.address, profile.contact?.city, profile.contact?.state, profile.contact?.zip].filter(Boolean).join(", ");
   const confColor = profile.confidence === "high" ? "#639922" : profile.confidence === "medium" ? "#EF9F27" : "#E24B4A";
   const confLabel = profile.confidence === "high" ? "High confidence — multiple sources found" : profile.confidence === "medium" ? "Medium confidence — some data gaps" : "Low confidence — limited sources found";
+  const isVerified = profile.dataSourceNotes?.includes("Verified against Google Places");
+  const isUnverified = profile.dataSourceNotes?.includes("Not found on Google Places");
+  const isFailed = profile.dataSourceNotes?.includes("Google Places check failed");
 
   return (
     <div>
@@ -353,7 +357,17 @@ function ProfileView({ profile, onCopy, onSave, copied, saved }) {
         </div>
       </div>
 
-      <div style={s.grid}>
+      {isVerified && (
+        <div style={s.placesVerified}>✓ Contact details verified against Google Places</div>
+      )}
+      {isUnverified && (
+        <div style={s.placesUnverified}>⚠ Business not found on Google Places — contact details unverified</div>
+      )}
+      {isFailed && (
+        <div style={s.placesUnverified}>⚠ Google Places check failed — contact details unverified</div>
+      )}
+
+      <div style={{ ...s.grid, marginTop: 14 }}>
         <div style={s.card}>
           <div style={s.cardLabel}>Contact & location</div>
           {addr && <DetailRow label="Address" value={addr} />}
@@ -449,7 +463,7 @@ function HistoryTab() {
     loadSearchHistory().then(rows => {
       setHistory(rows || []);
       setLoaded(true);
-    }).catch(() => setLoaded(true));
+    }).catch((e) => { console.error("History load failed", e); setLoaded(true); });
   }, []);
 
   if (!loaded) return <div style={{ padding: 40, textAlign: "center", color: "#888780", fontSize: 13 }}>Loading...</div>;
@@ -458,7 +472,7 @@ function HistoryTab() {
     <div style={s.emptyState}>
       <div style={s.emptyIcon}>🕐</div>
       <div style={s.emptyTitle}>No search history yet</div>
-      <div style={s.emptyDesc}>Every business you research will appear here.</div>
+      <div style={s.emptyDesc}>Every business you research will appear here automatically.</div>
     </div>
   );
 
@@ -552,8 +566,17 @@ export default function InsuredIQ() {
         if (m) parsed = JSON.parse(m[0]);
         else throw new Error("No business found for that input. Try a business name with city and state for best results.");
       }
-      setProfile(parsed);
 
+      // Log search immediately after getting result
+      logSearch({
+        query: q,
+        businessName: parsed.businessName,
+        city: parsed.contact?.city,
+        state: parsed.contact?.state,
+      }).catch(e => console.error("logSearch failed", e));
+
+      // Run Google Places verification
+      let finalProfile = { ...parsed };
       try {
         const placesRes = await fetch("/api/places", {
           method: "POST",
@@ -563,31 +586,31 @@ export default function InsuredIQ() {
         const placesData = await placesRes.json();
         if (placesData.found && placesData.result) {
           const gp = placesData.result;
-          setProfile(prev => ({
-            ...prev,
+          finalProfile = {
+            ...finalProfile,
             contact: {
-              ...prev.contact,
-              phone: gp.formatted_phone_number || prev.contact?.phone,
-              website: gp.website || prev.contact?.website,
-              address: gp.formatted_address || prev.contact?.address,
+              ...finalProfile.contact,
+              phone: gp.formatted_phone_number || finalProfile.contact?.phone,
+              website: gp.website || finalProfile.contact?.website,
+              address: gp.formatted_address || finalProfile.contact?.address,
             },
-            dataSourceNotes: (prev.dataSourceNotes || "") + " · Verified against Google Places.",
-          }));
+            dataSourceNotes: (finalProfile.dataSourceNotes || "") + " · Verified against Google Places.",
+          };
         } else {
-          setProfile(prev => ({
-            ...prev,
-            dataSourceNotes: (prev.dataSourceNotes || "") + " · Not found on Google Places — unverified.",
-          }));
+          finalProfile = {
+            ...finalProfile,
+            dataSourceNotes: (finalProfile.dataSourceNotes || "") + " · Not found on Google Places — unverified.",
+          };
         }
       } catch (placesErr) {
         console.error("Places lookup failed", placesErr);
-        setProfile(prev => ({
-          ...prev,
-          dataSourceNotes: (prev.dataSourceNotes || "") + " · Google Places check failed.",
-        }));
+        finalProfile = {
+          ...finalProfile,
+          dataSourceNotes: (finalProfile.dataSourceNotes || "") + " · Google Places check failed.",
+        };
       }
 
-      logSearch({ query: q, businessName: parsed.businessName, city: parsed.contact?.city, state: parsed.contact?.state }).catch(() => {});
+      setProfile(finalProfile);
     } catch (err) {
       setError(err.message || "Unknown error. Please try again.");
     } finally {
