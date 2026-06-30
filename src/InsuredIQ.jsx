@@ -553,29 +553,40 @@ export default function InsuredIQ() {
         else throw new Error("No business found for that input. Try a business name with city and state for best results.");
       }
       setProfile(parsed);
+
       try {
-  const placesRes = await fetch("/api/places", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: `${parsed.businessName} ${parsed.contact?.city || ""} ${parsed.contact?.state || ""}` }),
-  });
-  const placesData = await placesRes.json();
-  if (placesData.found && placesData.result) {
-    const gp = placesData.result;
-    setProfile(prev => ({
-      ...prev,
-      contact: {
-        ...prev.contact,
-        phone: gp.formatted_phone_number || prev.contact?.phone,
-        website: gp.website || prev.contact?.website,
-        address: gp.formatted_address || prev.contact?.address,
-      },
-      dataSourceNotes: (prev.dataSourceNotes || "") + " · Verified against Google Places.",
-    }));
-  }
-} catch (e) {
-  console.error("Places lookup failed", e);
-}
+        const placesRes = await fetch("/api/places", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: `${parsed.businessName} ${parsed.contact?.city || ""} ${parsed.contact?.state || ""}` }),
+        });
+        const placesData = await placesRes.json();
+        if (placesData.found && placesData.result) {
+          const gp = placesData.result;
+          setProfile(prev => ({
+            ...prev,
+            contact: {
+              ...prev.contact,
+              phone: gp.formatted_phone_number || prev.contact?.phone,
+              website: gp.website || prev.contact?.website,
+              address: gp.formatted_address || prev.contact?.address,
+            },
+            dataSourceNotes: (prev.dataSourceNotes || "") + " · Verified against Google Places.",
+          }));
+        } else {
+          setProfile(prev => ({
+            ...prev,
+            dataSourceNotes: (prev.dataSourceNotes || "") + " · Not found on Google Places — unverified.",
+          }));
+        }
+      } catch (placesErr) {
+        console.error("Places lookup failed", placesErr);
+        setProfile(prev => ({
+          ...prev,
+          dataSourceNotes: (prev.dataSourceNotes || "") + " · Google Places check failed.",
+        }));
+      }
+
       logSearch({ query: q, businessName: parsed.businessName, city: parsed.contact?.city, state: parsed.contact?.state }).catch(() => {});
     } catch (err) {
       setError(err.message || "Unknown error. Please try again.");
