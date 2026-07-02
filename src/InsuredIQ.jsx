@@ -745,7 +745,7 @@ export default function InsuredIQ() {
               onFocus={() => setFocused(true)}
               onBlur={() => setTimeout(() => setFocused(false), 130)}
               placeholder="Business name or address…"
-              style={{ width: 236, height: 40, border: "1px solid rgba(28,28,26,0.18)", borderRadius: 9, padding: "0 12px", fontSize: 13.5, fontFamily: FONT, color: C.ink, background: "#fff", outline: "none" }} />
+              style={{ width: 236, height: 40, boxSizing: "border-box", border: "1px solid rgba(28,28,26,0.18)", borderRadius: 9, padding: "0 12px", fontSize: 13.5, fontFamily: FONT, color: C.ink, background: "#fff", outline: "none" }} />
             {showSuggest && (
               <div style={{ position: "absolute", top: 44, left: 0, right: 0, zIndex: 30, background: "#fff", border: "1px solid rgba(28,28,26,0.14)", borderRadius: 10, boxShadow: "0 10px 28px rgba(28,28,26,0.14)", overflow: "hidden" }}>
                 <div style={{ padding: "8px 12px 5px", fontSize: 10, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase", color: C.ghost }}>Saved profiles</div>
